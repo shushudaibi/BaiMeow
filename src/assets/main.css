@@ -1,0 +1,261 @@
+/*
+  全站基础样式与主题变量。
+
+  设计原则：
+  1. 组件只使用 --bm-* 变量，不写死页面颜色；
+  2. 三种主题共用同一套组件结构，只替换变量值；
+  3. Element Plus 的变量同步映射到项目变量，让原生组件也能跟随主题。
+*/
+
+/* 根元素定义默认“简约朴素风”。变量命名中的 bm 来自 BaiMeow。 */
+:root,
+html[data-theme='plain'] {
+  color-scheme: light;
+
+  /* 页面与表面颜色 */
+  --bm-bg: #edf0ec;
+  --bm-surface: #ffffff;
+  --bm-surface-soft: #f5f7f4;
+  --bm-notice-bg: #fafbf9;
+
+  /* 文字颜色 */
+  --bm-text-strong: #22342e;
+  --bm-text: #34463f;
+  --bm-text-muted: #67766f;
+  --bm-text-faint: #8b9892;
+
+  /* 主色与点缀色 */
+  --bm-primary: #526f66;
+  --bm-primary-soft: #e8efeb;
+  --bm-primary-border: #b9cbc4;
+  --bm-accent: #cf765e;
+  --bm-accent-soft: #faeee9;
+  --bm-accent-border: #efd0c4;
+
+  /* 状态色 */
+  --bm-success: #3b8066;
+  --bm-success-soft: #e9f5ef;
+  --bm-success-border: #b7d9c9;
+  --bm-danger: #ba554f;
+  --bm-danger-soft: #faeceb;
+
+  /* 边框、阴影与动效 */
+  --bm-border: #dfe5e1;
+  --bm-border-strong: #c9d3ce;
+  --bm-shadow-soft: 0 8px 28px rgba(42, 65, 57, 0.06);
+  --bm-focus-ring: rgba(82, 111, 102, 0.2);
+}
+
+/* 小清新风使用更明亮的薄荷绿与柔和粉色。 */
+html[data-theme='fresh'] {
+  color-scheme: light;
+
+  --bm-bg: #eaf7f4;
+  --bm-surface: #ffffff;
+  --bm-surface-soft: #f1fbf8;
+  --bm-notice-bg: #f8fdfb;
+
+  --bm-text-strong: #183c38;
+  --bm-text: #28504b;
+  --bm-text-muted: #5f7e79;
+  --bm-text-faint: #86a19d;
+
+  --bm-primary: #258f84;
+  --bm-primary-soft: #dff5f1;
+  --bm-primary-border: #a8ddd5;
+  --bm-accent: #df758d;
+  --bm-accent-soft: #fdecf0;
+  --bm-accent-border: #f3c8d2;
+
+  --bm-success: #278268;
+  --bm-success-soft: #e5f7ef;
+  --bm-success-border: #a9ddc9;
+  --bm-danger: #c24f55;
+  --bm-danger-soft: #fdecee;
+
+  --bm-border: #d4e9e5;
+  --bm-border-strong: #b7d9d3;
+  --bm-shadow-soft: 0 10px 30px rgba(33, 112, 101, 0.08);
+  --bm-focus-ring: rgba(37, 143, 132, 0.22);
+}
+
+/* 未来科技风使用近黑底色、青蓝主色与紫色辅助色。 */
+html[data-theme='tech'] {
+  color-scheme: dark;
+
+  --bm-bg: #090e14;
+  --bm-surface: #111a23;
+  --bm-surface-soft: #16222d;
+  --bm-notice-bg: #0d151d;
+
+  --bm-text-strong: #edfffc;
+  --bm-text: #d5e8e5;
+  --bm-text-muted: #9db4b3;
+  --bm-text-faint: #70878a;
+
+  --bm-primary: #2dd4bf;
+  --bm-primary-soft: #102e2d;
+  --bm-primary-border: #236b64;
+  --bm-accent: #8ba2ff;
+  --bm-accent-soft: #18213e;
+  --bm-accent-border: #344677;
+
+  --bm-success: #4ade97;
+  --bm-success-soft: #102b23;
+  --bm-success-border: #236348;
+  --bm-danger: #ff7b84;
+  --bm-danger-soft: #321b22;
+
+  --bm-border: #23323e;
+  --bm-border-strong: #344858;
+  --bm-shadow-soft: 0 12px 34px rgba(0, 0, 0, 0.25);
+  --bm-focus-ring: rgba(45, 212, 191, 0.24);
+}
+
+/*
+  把项目变量映射给 Element Plus。
+  这样 el-button、el-drawer、el-input 等组件无需逐个重写主要颜色。
+*/
+:root {
+  --el-color-primary: var(--bm-primary);
+  --el-color-primary-light-3: var(--bm-primary-border);
+  --el-color-primary-light-5: var(--bm-primary-border);
+  --el-color-primary-light-7: var(--bm-primary-soft);
+  --el-color-primary-light-8: var(--bm-primary-soft);
+  --el-color-primary-light-9: var(--bm-primary-soft);
+  --el-color-primary-dark-2: var(--bm-primary);
+
+  --el-bg-color: var(--bm-surface);
+  --el-bg-color-page: var(--bm-bg);
+  --el-bg-color-overlay: var(--bm-surface);
+  --el-fill-color-blank: var(--bm-surface);
+  --el-fill-color-light: var(--bm-surface-soft);
+  --el-fill-color-lighter: var(--bm-surface-soft);
+
+  --el-text-color-primary: var(--bm-text-strong);
+  --el-text-color-regular: var(--bm-text);
+  --el-text-color-secondary: var(--bm-text-muted);
+  --el-text-color-placeholder: var(--bm-text-faint);
+  --el-border-color: var(--bm-border);
+  --el-border-color-light: var(--bm-border);
+  --el-border-color-lighter: var(--bm-border);
+  --el-border-color-hover: var(--bm-primary-border);
+  --el-mask-color: rgba(10, 18, 24, 0.56);
+
+  /* 统一组件圆角，避免每个页面出现不同按钮形状。 */
+  --el-border-radius-base: 7px;
+  --el-border-radius-small: 6px;
+}
+
+/* 所有元素都使用 border-box，固定宽高与内边距计算更直观。 */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* 清除浏览器默认间距。 */
+html,
+body,
+#app {
+  min-height: 100%;
+  margin: 0;
+}
+
+/* 根节点平滑切换颜色，但不对布局属性使用动画。 */
+html {
+  min-width: 320px;
+  background: var(--bm-bg);
+  transition:
+    background-color 0.25s ease,
+    color 0.25s ease;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  color: var(--bm-text);
+  background: var(--bm-bg);
+  font-family: 'Microsoft YaHei UI', 'PingFang SC', 'Noto Sans SC', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 表单控件默认继承页面字体，避免中英文混排时字体突然变化。 */
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+/* 普通按钮默认继承主题文字色，具体外观由组件样式决定。 */
+button {
+  color: inherit;
+}
+
+/* 键盘焦点使用主题色描边，鼠标点击不会一直保留描边。 */
+:focus-visible {
+  outline: 3px solid var(--bm-focus-ring);
+  outline-offset: 2px;
+}
+
+/* 选中文字时使用主色浅背景。 */
+::selection {
+  color: var(--bm-text-strong);
+  background: var(--bm-primary-soft);
+}
+
+/* 滚动条也跟随主题，不出现默认亮色破坏整体风格。 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--bm-border-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--bm-border-strong);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+/* 抽屉和遮罩属于 Teleport 到 body 的元素，因此需要全局规则。 */
+.el-overlay {
+  backdrop-filter: blur(2px);
+}
+
+.theme-drawer.el-drawer {
+  color: var(--bm-text);
+  background: var(--bm-surface);
+}
+
+/* Element Plus 消息提示与主题保持一致。 */
+.el-message {
+  color: var(--bm-text-strong);
+  background: var(--bm-surface);
+  border-color: var(--bm-border);
+}
+
+/* 用户如果开启“减少动态效果”，关闭全站过渡与滚动动画。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
