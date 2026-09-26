@@ -7,8 +7,9 @@ import { Bell } from '@element-plus/icons-vue'
 
 // 后续接入接口后，只需要把接口数据赋值给这个数组。
 const announcements = [
-  'BaiMeow 已支持 PDF 拆分、PDF 合并和文字型课表提取。',
-  '所有文件都在本地浏览器处理，不会上传到服务器。',
+  'PDF 工作台包含四类十五项工具，每个工具都提供处理前后效果预览。',
+  'PDF 加载、页面选择与合并由 pdfuse-core 完成。',
+  '大文件处理进入 Web Worker，所有文件仍只在本地浏览器中处理。',
   '图片水印功能正在设计，将在后续版本开放。',
 ]
 </script>

@@ -10,171 +10,216 @@ flowchart TB
   Main --> Router[src/router/index.ts]
   Main --> Pinia[Pinia 状态容器]
 
-  App -->|读取主题状态并写入 html data-theme| ThemeStore[src/stores/theme.ts]
-  App --> RouterView[RouterView]
-  RouterView --> Home[src/views/HomeView.vue]
+  App --> ThemeStore[stores/theme.ts]
+  App --> Home[views/HomeView.vue]
 
-  Home --> AppHeader[layout/AppHeader.vue]
-  Home --> NoticeBar[layout/NoticeBar.vue]
-  Home --> Sidebar[workspace/FunctionSidebar.vue]
-  Home --> Workspace[workspace/PdfWorkspace.vue]
-  Home --> Advert[workspace/AdvertPanel.vue]
-  Home --> Comments[workspace/CommentSection.vue]
-  Home --> Settings[settings/ThemeSettingsDrawer.vue]
+  Home --> Header[layout/AppHeader.vue]
+  Home --> Notice[layout/NoticeBar.vue]
+  Home --> Sidebar[FunctionSidebar.vue]
+  Home --> Workspace[PdfWorkspace.vue]
+  Home --> Advert[AdvertPanel.vue]
+  Home --> Comments[CommentSection.vue]
 
-  Sidebar -->|ToolKey| Workspace
-  Settings --> ThemeStore
+  Sidebar --> ToolConfig[config/pdf-tools.ts]
+  Workspace --> ToolConfig
+  Workspace --> OptionsPanel[PdfToolOptionsPanel.vue]
+  Workspace --> Preview[PdfPreview.vue]
 
-  Workspace --> PdfTools[src/utils/pdf-tools.ts]
-  PdfTools --> PdfLib[pdf-lib: 拆分与合并]
-  PdfTools --> PdfJs[pdfjs-dist: 提取文字]
-  PdfTools --> Xlsx[xlsx: 生成 Excel]
+  Workspace --> PdfTools[utils/pdf-tools.ts]
+  PdfTools --> WorkerClient[utils/pdf-worker-client.ts]
+  WorkerClient --> PdfWorker[workers/pdf-processing.worker.ts]
+  PdfWorker --> PdfOperation[utils/pdf-operation.ts]
+  PdfOperation --> PdfUseCore[pdfuse-core]
 
-  ThemeStore --> GlobalCss[src/assets/main.css]
-  GlobalCss --> ThemePlain[plain: 简约朴素风]
-  GlobalCss --> ThemeFresh[fresh: 小清新风]
-  GlobalCss --> ThemeTech[tech: 未来科技风]
+  Preview --> PdfPreviewUtils[utils/pdf-preview.ts]
+  PdfPreviewUtils --> PdfUsePreview[pdfuse-core/preview]
+  PdfPreviewUtils --> PDFJsWorker[pdfjs-dist Worker]
+
+  PdfTools --> Xlsx[xlsx]
 ```
 
-## 2. 数据流说明
+## 2. PDF 工具目录
 
-### 主题切换
+PDF 顶层默认展开，二级分类中只默认展开“常用功能”；页面管理、内容与版式、
+信息与导出默认隐藏，点击分类标题后展开。
 
-1. 用户点击右上角设置按钮。
-2. `ThemeSettingsDrawer.vue` 调用 `themeStore.setTheme()`。
-3. Pinia 更新主题并把结果写入 `localStorage`。
-4. `App.vue` 监听到主题变化，将值写到 `<html data-theme="plain|fresh|tech">`。
-5. `src/assets/main.css` 根据属性切换 CSS 变量，所有组件立即更新颜色。
+| 分类 | 工具 | 说明 |
+| --- | --- | --- |
+| 常用功能 | PDF 合并 | 多文件按队列顺序选择全部页面并合并。 |
+| 常用功能 | PDF 拆分 | 输入页码范围，创建只含选中页面的新 PDF。 |
+| 常用功能 | 提取页面 | 支持连续或不连续页面提取。 |
+| 页面管理 | 删除页面 | 从原页面集合中排除指定页码。 |
+| 页面管理 | 旋转页面 | 对指定页面叠加 90、180 或 270 度旋转。 |
+| 页面管理 | 页面重排 | 输入包含全部页面的新顺序，防止意外丢页。 |
+| 页面管理 | 插入空白页 | 设置插入位置、宽度和高度。 |
+| 内容与版式 | 添加页码 | 设置位置、起始数字和字号。 |
+| 内容与版式 | 文字水印 | 设置文字、透明度、角度和字号。 |
+| 内容与版式 | 页面裁剪 | 设置上、右、下、左裁剪边距。 |
+| 信息与导出 | 文档体检 | 查看页数、页面尺寸和元数据。 |
+| 信息与导出 | 修改文档信息 | 编辑标题、作者、主题和关键词。 |
+| 信息与导出 | 页面导出 PNG | 使用预览模块把当前页导出为 2 倍分辨率图片。 |
+| 信息与导出 | 课表转 Excel | 加载本地 CMap、按页面旋转坐标归行并按节次重组后输出 `.xlsx`。 |
+| 信息与导出 | 优化保存 | 使用对象流重写 PDF 结构。 |
 
-### PDF 处理
+图片水印仍然只保留菜单入口，没有实现图片处理逻辑。
 
-1. 用户拖拽或选择 PDF 文件。
-2. `PdfWorkspace.vue` 把文件转换成 `PdfFileItem[]`。
-3. `src/utils/pdf-tools.ts` 根据当前工具调用拆分、合并或课表转换函数。
-4. 大体积依赖按操作动态加载，不使用某项功能时不会提前下载。
-5. 处理结果以 `Blob` 保存在内存中，用户点击下载后才由浏览器写入本地文件。
+## 3. `pdfuse-core` 的职责边界
 
-### 留言
+项目使用 `pdfuse-core` 处理 PDF 的加载、页面选择和合并：
 
-当前版本没有后端，`CommentSection.vue` 使用 `localStorage` 保存留言。以后接入接口时，只需要替换读取、提交和持久化三个函数，不需要修改页面结构。
+```ts
+import { loadPdfDocument, mergeSelectedPages } from 'pdfuse-core'
+```
 
-## 3. 目录结构
+`loadPdfDocument` 返回 pdf-lib 的 `PDFDocument`，项目通过这个文档继续执行旋转、
+页码、水印、裁剪、插入空白页和元数据修改。这种用法符合 `pdfuse-core` 官方说明中
+“高级编辑可以继续使用返回的 `pdfDoc`”这一设计。
+
+缩略图和页面渲染只从独立子路径加载：
+
+```ts
+import { renderPageToCanvas } from 'pdfuse-core/preview'
+```
+
+页面渲染仍由 `pdfuse-core/preview` 完成；加载包含 CID 字体的文档时，
+项目会在同一版本的 `pdfjs-dist` 上补充 `cMapUrl` 和 `standardFontDataUrl`，
+再把得到的 PDFDocumentProxy 交给 `renderPageToCanvas`。这样不使用预览功能时
+不会提前加载 PDF.js，同时中文 CID 字体也能正确解析。
+
+课表 PDF 使用 `STSong-Light + UniGB-UCS2-H` 这类 CID 字体时，需要额外的
+CMap 才能把字符编码转换成 Unicode。项目已将 `pdfjs-dist/cmaps` 和
+`standard_fonts` 复制到 `public/pdfjs/`，课表解析时会传入对应的
+`cMapUrl` 和 `standardFontDataUrl`。
+
+## 4. Web Worker 数据流
+
+大文件的页面复制、文字绘制和重新保存都可能阻塞主线程。当前实现如下：
+
+1. `PdfWorkspace.vue` 调用 `utils/pdf-tools.ts`；
+2. `pdf-tools.ts` 把 `File` 转换为 `ArrayBuffer + 文件元数据`；
+3. `pdf-worker-client.ts` 给请求分配递增 id，并通过 Worker 发送；
+4. `workers/pdf-processing.worker.ts` 调用统一执行器；
+5. `utils/pdf-operation.ts` 使用 `pdfuse-core` 和 pdf-lib 完成处理；
+6. Worker 把结果 `ArrayBuffer` 使用 Transferable 返回主线程；
+7. 工作台创建 Blob 并触发下载。
+
+如果浏览器不支持 Worker API，`pdf-worker-client.ts` 会动态加载同一个核心执行器
+并在主线程中运行，保证功能仍然可用。
+
+预览渲染不使用自定义 Worker，因为 `pdfuse-core/preview` 内部已经使用 PDF.js
+自己的 Worker 解析页面，主线程只负责把结果画到 canvas。
+
+## 5. 目录结构
 
 ```text
 baimeow-v0/
 ├─ docs/
-│  └─ PROJECT_STRUCTURE.md       项目架构、数据流和文件用途
+│  └─ PROJECT_STRUCTURE.md
 ├─ public/
-│  └─ favicon.ico                浏览器标签页图标
+│  └─ favicon.ico
 ├─ src/
 │  ├─ assets/
-│  │  ├─ logo.png                网站 Logo
-│  │  └─ main.css                全局重置、三种主题变量和 Element Plus 映射
+│  │  ├─ logo.png
+│  │  └─ main.css
 │  ├─ components/
 │  │  ├─ layout/
-│  │  │  ├─ AppHeader.vue         Logo、网站名和设置按钮
-│  │  │  └─ NoticeBar.vue         细滚动公告
+│  │  │  ├─ AppHeader.vue
+│  │  │  └─ NoticeBar.vue
 │  │  ├─ settings/
-│  │  │  └─ ThemeSettingsDrawer.vue  主题设置抽屉
+│  │  │  └─ ThemeSettingsDrawer.vue
 │  │  └─ workspace/
-│  │     ├─ FunctionSidebar.vue   左侧可折叠功能菜单
-│  │     ├─ PdfWorkspace.vue      拖拽、文件队列和处理结果
-│  │     ├─ AdvertPanel.vue       右侧广告与用户投稿占位
-│  │     └─ CommentSection.vue    留言输入和留言列表
+│  │     ├─ FunctionSidebar.vue
+│  │     ├─ PdfWorkspace.vue
+│  │     ├─ PdfToolOptionsPanel.vue
+│  │     ├─ PdfPreview.vue
+│  │     ├─ AdvertPanel.vue
+│  │     └─ CommentSection.vue
+│  ├─ config/
+│  │  └─ pdf-tools.ts
 │  ├─ router/
-│  │  └─ index.ts                 页面路由配置
+│  │  └─ index.ts
 │  ├─ stores/
-│  │  └─ theme.ts                 当前主题与本地持久化
+│  │  └─ theme.ts
 │  ├─ types/
-│  │  └─ pdf.ts                   PDF 文件和工具共享类型
+│  │  ├─ pdf.ts
+│  │  └─ pdf-worker.ts
 │  ├─ utils/
-│  │  └─ pdf-tools.ts             PDF 拆分、合并、文字提取和 Excel 导出
+│  │  ├─ pdf-tools.ts
+│  │  ├─ pdf-operation.ts
+│  │  ├─ pdf-preview.ts
+│  │  └─ pdf-worker-client.ts
 │  ├─ views/
-│  │  └─ HomeView.vue             首页组件组合与响应式三栏布局
-│  ├─ App.vue                     根组件与主题同步
-│  └─ main.ts                     Vue、Pinia、Router、Element Plus 入口
-├─ auto-imports.d.ts             unplugin-auto-import 自动生成类型
-├─ components.d.ts               unplugin-vue-components 自动生成类型
-├─ env.d.ts                      Vite 环境类型
-├─ eslint.config.ts              ESLint 配置
-├─ index.html                    HTML 模板、页面标题和 Meta 信息
-├─ package.json                  依赖与脚本
-├─ package-lock.json             依赖锁定文件
-├─ tsconfig*.json                TypeScript 分层配置
-└─ vite.config.ts                Vite、Vue、自动导入和路径别名配置
+│  │  └─ HomeView.vue
+│  ├─ workers/
+│  │  └─ pdf-processing.worker.ts
+│  ├─ App.vue
+│  └─ main.ts
+├─ index.html
+├─ package.json
+├─ package-lock.json
+├─ vite.config.ts
+└─ tsconfig*.json
 ```
 
-## 4. 文件用途
+## 6. 关键文件说明
 
 | 文件 | 用途 |
 | --- | --- |
-| `index.html` | 浏览器首先加载的 HTML，包含挂载节点、页面标题和描述。 |
-| `src/main.ts` | 创建 Vue 应用并注册 Pinia、路由和 Element Plus。 |
-| `src/App.vue` | 根组件，只负责主题同步和渲染当前路由页面。 |
-| `src/router/index.ts` | 把 `/` 映射到 `HomeView.vue`，方便以后扩展新页面。 |
-| `src/views/HomeView.vue` | 组合页头、公告、侧栏、工作台、广告和评论区。 |
-| `src/components/layout/AppHeader.vue` | Logo、BaiMeow 网站名和设置按钮。 |
-| `src/components/layout/NoticeBar.vue` | 高度较细的无限滚动公告。 |
-| `src/components/workspace/FunctionSidebar.vue` | PDF 与图片分组菜单，PDF 默认展开。 |
-| `src/components/workspace/PdfWorkspace.vue` | 文件拖拽、列表排序、参数输入、进度、结果下载。 |
-| `src/components/workspace/AdvertPanel.vue` | 用户投稿广告区和站内推荐占位。 |
-| `src/components/workspace/CommentSection.vue` | 本地留言提交、校验、时间格式化与展示。 |
-| `src/components/settings/ThemeSettingsDrawer.vue` | 三种主题选择面板。 |
-| `src/stores/theme.ts` | 默认主题、主题校验和 `localStorage` 持久化。 |
-| `src/types/pdf.ts` | 避免 PDF 工具和组件之间重复定义对象结构。 |
-| `src/utils/pdf-tools.ts` | 所有 PDF 文件处理逻辑，与 Vue 页面解耦。 |
-| `src/assets/main.css` | 全局样式、响应式基础、三种主题和 Element Plus 变量。 |
-| `src/assets/logo.png` | 当前网站 Logo。 |
-| `public/favicon.ico` | 浏览器标签页图标。 |
+| `config/pdf-tools.ts` | 十五个工具的标题、图标、分类和参数默认值。 |
+| `components/workspace/FunctionSidebar.vue` | 三级菜单，PDF 展开且仅“常用功能”默认展开。 |
+| `components/workspace/PdfWorkspace.vue` | 文件队列、参数、进度和结果展示。 |
+| `components/workspace/PdfToolOptionsPanel.vue` | 每种工具对应的参数表单。 |
+| `components/workspace/PdfPreview.vue` | 缩略图、当前页预览和翻页。 |
+| `components/workspace/PdfEffectPreview.vue` | 每个工具共用的处理前、处理后效果对照。 |
+| `utils/pdf-operation.ts` | 可同时运行在主线程和 Worker 的核心 PDF 操作。 |
+| `workers/pdf-processing.worker.ts` | Worker 消息入口和 Transferable 返回。 |
+| `utils/pdf-worker-client.ts` | Worker 单例、请求 id 和 Promise 管理。 |
+| `utils/pdf-preview.ts` | 统一配置 `pdfuse-core/preview` 与 PDF.js Worker。 |
+| `utils/pdf-tools.ts` | 对工作台暴露的业务函数和统一工具入口。 |
+| `types/pdf.ts` | PDF 工具、文件和结果类型。 |
+| `types/pdf-worker.ts` | 主线程与 Worker 的消息协议。 |
 
-## 5. Logo 放置说明
+## 7. Logo 放置位置
 
-推荐继续使用 Vite 管理的资源目录：
+推荐替换：
 
 ```text
 src/assets/logo.png
 ```
 
-原因是 `AppHeader.vue` 已经通过 `import logoUrl from '@/assets/logo.png'` 引入它。构建时 Vite 会自动处理路径和缓存版本，替换同名文件即可，不需要修改模板。
+`AppHeader.vue` 已经通过 Vite 导入该文件，保持文件名不变即可。建议使用正方形图片，
+尺寸为 512 × 512 或 1024 × 1024，并尽量将文件控制在 200 KB 左右。
 
-另一种方式是放在：
+如果改放到 `public/logo.png`，需要把 `AppHeader.vue` 中的导入改为固定路径 `/logo.png`。
+当前项目推荐继续使用 `src/assets/logo.png`。
 
-```text
-public/logo.png
+## 8. 三种主题
+
+主题变量集中在 `src/assets/main.css`：
+
+| `data-theme` | 主题 |
+| --- | --- |
+| `plain` | 简约朴素风，默认值 |
+| `fresh` | 小清新风 |
+| `tech` | 未来科技风 |
+
+组件只使用 `var(--bm-*)`，切换主题不会重建页面结构。
+
+## 9. 验证方式
+
+开发完成后执行：
+
+```bash
+npm run type-check
+npm run build
+npx eslint . --no-fix
+npx oxlint .
 ```
 
-`public` 中的文件不会参与构建哈希，访问路径固定为 `/logo.png`。如果改放这里，需要把
-`AppHeader.vue` 中的导入改成字符串路径 `/logo.png`。
+浏览器验证应至少覆盖：
 
-对于当前项目，建议使用 `src/assets/logo.png`。推荐图片规格：
-
-- 正方形或接近正方形；
-- 512 × 512 或 1024 × 1024；
-- PNG 背景透明或使用纯色背景；
-- 文件尽量小于 200 KB，避免拖慢首屏。
-
-## 6. 三种主题
-
-主题变量集中定义在 `src/assets/main.css`：
-
-| `data-theme` | 主题名称 | 主要特征 |
-| --- | --- | --- |
-| `plain` | 简约朴素风 | 低饱和绿色、暖色点缀，默认主题。 |
-| `fresh` | 小清新风 | 明亮薄荷绿与柔和粉色。 |
-| `tech` | 未来科技风 | 近黑背景、青色主色与蓝紫高光。 |
-
-组件不应该写死颜色，而应使用 `var(--bm-*)`。这样增加第四种主题时，只需要增加一组变量，不需要逐个修改页面组件。
-
-## 7. 已清理的脚手架文件
-
-以下默认演示文件没有参与当前业务，已删除：
-
-- `AboutView.vue`
-- `stores/counter.ts`
-- `HelloWorld.vue`
-- `TheWelcome.vue`
-- `WelcomeItem.vue`
-- `components/icons/` 下的 Vue 默认图标组件
-- 旧的 `assets/base.css`
-
-保留的配置文件均是开发、构建、格式化或类型检查所需文件。
+- 桌面端和 375px 手机端无横向溢出；
+- 上传 PDF 后能显示页数、缩略图和当前页；
+- 每个 PDF 工具可以生成对应结果；
+- Worker 控制台没有版本或序列化错误；
+- 拆分、合并、PNG 和 Excel 文件可以正常下载。

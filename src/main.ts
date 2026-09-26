@@ -6,6 +6,7 @@
  * 2. 注册 Vue 的全局插件（Pinia、Router、Element Plus）；
  * 3. 将根组件 App.vue 挂载到 index.html 中的 #app 节点。
  */
+
 import './assets/main.css'
 
 import { createApp } from 'vue'

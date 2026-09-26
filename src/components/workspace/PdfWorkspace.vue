@@ -1,114 +1,82 @@
 <!--
-  PdfWorkspace.vue 是页面中间的核心功能区。
-  它根据 activeTool 展示 PDF 拆分、PDF 合并、课表转换或水印占位页面。
+  PdfWorkspace.vue 是 PDF 工具的核心工作台。
+
+  它统一负责：
+  1. 文件拖拽与队列管理；
+  2. 读取页数和文档信息；
+  3. 显示当前工具的参数表单；
+  4. 调用 pdfuse-core 处理流程；
+  5. 展示缩略图、预览、进度和处理结果。
 -->
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import {
   ArrowDown,
   ArrowUp,
   CircleCheck,
-  Connection,
   Delete,
   Document,
   Download,
   Grid,
   MagicStick,
   Plus,
-  Scissor,
   UploadFilled,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { convertPdfScheduleToExcel, getPdfPageCount, mergePdfs, splitPdf } from '@/utils/pdf-tools'
-import type { GeneratedPdfFile, PdfFileItem, ToolKey } from '@/types/pdf'
+import PdfEffectPreview from '@/components/workspace/PdfEffectPreview.vue'
+import PdfToolOptionsPanel from '@/components/workspace/PdfToolOptionsPanel.vue'
+import { createDefaultPdfToolOptions, getPdfToolDefinition } from '@/config/pdf-tools'
+import { inspectPdf, processPdfTool } from '@/utils/pdf-tools'
+import type { PdfFileItem, PdfToolKey, PdfToolOptions, PdfToolResult, ToolKey } from '@/types/pdf'
 
-// activeTool 由左侧功能菜单控制。
+// activeTool 由左侧三级菜单控制。
 const props = defineProps<{
   activeTool: ToolKey
 }>()
 
-// 水印占位页可以把用户送回 PDF 拆分，因此向页面发送工具切换事件。
+// 水印占位页可以返回 PDF 页面预览。
 const emit = defineEmits<{
   'select-tool': [tool: ToolKey]
 }>()
 
-// 模板中需要使用文件输入框的 DOM 引用，以便点击普通按钮时触发文件选择。
+// 隐藏的原生 file input，由拖拽区和选择按钮共同触发。
 const fileInputRef = ref<HTMLInputElement | null>(null)
 
-// 待处理文件列表；合并模式可以包含多个文件。
+// 待处理文件列表；合并模式可以保存多个文件。
 const fileItems = ref<PdfFileItem[]>([])
 
-// 拆分页码输入，默认提取第 1 至第 3 页。
-const pageRange = ref('1-3')
+// 所有工具的表单参数统一保存，切换工具时恢复默认值。
+const toolOptions = reactive<PdfToolOptions>(createDefaultPdfToolOptions())
 
-// 拖拽状态用于改变拖拽区域边框和背景。
+// 处理前效果预览的当前页码，PNG 导出也使用这个页码。
+const previewPage = ref(1)
+
 const isDragging = ref(false)
-
-// 处理进度和运行状态。
 const isProcessing = ref(false)
 const progress = ref(0)
+const result = ref<PdfToolResult | null>(null)
 
-// 最近一次处理结果，用户点击下载时使用。
-const generatedFile = ref<GeneratedPdfFile | null>(null)
-
-// 每种工具对应的文案、图标和按钮名称。
-const toolMeta: Record<
-  Exclude<ToolKey, 'watermark'>,
-  {
-    title: string
-    subtitle: string
-    dropTitle: string
-    dropHint: string
-    actionText: string
-    icon: typeof Document
-  }
-> = {
-  split: {
-    title: 'PDF 拆分',
-    subtitle: '选择页码范围，生成一个新的 PDF 文件',
-    dropTitle: '拖入一个 PDF 文件',
-    dropHint: '或点击下方按钮浏览文件，支持标准 PDF',
-    actionText: '开始拆分',
-    icon: Scissor,
-  },
-  merge: {
-    title: 'PDF 合并',
-    subtitle: '添加多个 PDF，并通过上移、下移调整页面顺序',
-    dropTitle: '拖入两个或更多 PDF 文件',
-    dropHint: '也可以多次选择文件，列表顺序就是合并顺序',
-    actionText: '开始合并',
-    icon: Connection,
-  },
-  schedule: {
-    title: 'PDF 课表转 Excel',
-    subtitle: '读取文字型 PDF，按坐标还原表格行列并导出 .xlsx',
-    dropTitle: '拖入一个课表 PDF 文件',
-    dropHint: '暂不支持扫描图片型 PDF，图片课表需要 OCR',
-    actionText: '转换为 Excel',
-    icon: Grid,
-  },
-}
-
-// 当前工具的有效配置。水印功能在模板中单独处理，因此这里排除 watermark。
+// 非水印工具都能从中央配置取得标题、按钮和图标。
 const currentMeta = computed(() => {
-  if (props.activeTool === 'watermark') {
-    return toolMeta.split
-  }
-  return toolMeta[props.activeTool]
+  if (props.activeTool === 'watermark') return null
+  return getPdfToolDefinition(props.activeTool)
 })
 
-// 只有合并模式允许一次添加多个文件。
-const allowMultipleFiles = computed(() => props.activeTool === 'merge')
+// 只有合并模式允许一次选择多个文件。
+const allowMultipleFiles = computed(() => currentMeta.value?.acceptMultiple ?? false)
 
-// 待处理列表的文件总数提示。
+// 每个工具的统一效果预览都使用当前队列中的原始文件。
+const previewSources = computed(() => fileItems.value.map((item) => item.file))
+
+// 合并和单文件工具在界面提示上使用不同文案。
 const queueSummary = computed(() => {
   const totalSize = fileItems.value.reduce((sum, item) => sum + item.file.size, 0)
   return `${fileItems.value.length} 个文件 · ${formatFileSize(totalSize)}`
 })
 
 /**
- * 在切换工具时清空旧文件和旧结果。
- * 这样用户从拆分切到合并时，不会误把上一次的 PDF 当成当前任务文件。
+ * 切换工具时重置工作台。
+ * 这可以避免把上一个工具的文件和结果误带入当前工具。
  */
 watch(
   () => props.activeTool,
@@ -117,34 +85,31 @@ watch(
   },
 )
 
-// 点击按钮时触发隐藏的 file input。
+// 点击自定义按钮时触发系统文件选择框。
 function openFilePicker() {
   fileInputRef.value?.click()
 }
 
-/**
- * 判断 File 是否是 PDF。
- * 有些系统不会提供 MIME type，因此同时检查 .pdf 扩展名。
- */
+// 同时检查 MIME type 和扩展名，兼容不同操作系统。
 function isPdfFile(file: File) {
   return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
 }
 
-// 将字节转换成更容易阅读的文件大小文本。
+// 把字节数转换成易读格式。
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`
 }
 
-// 使用文件名、文件大小和修改时间组合成去重键，避免同一文件被重复添加。
+// 文件名、大小和修改时间共同组成去重键。
 function getFileKey(file: File) {
   return `${file.name}-${file.size}-${file.lastModified}`
 }
 
 /**
- * 接收浏览器选择的 FileList。
- * 非 PDF 文件会被忽略；拆分和课表转换模式只保留第一个文件。
+ * 把文件加入队列，并通过 Worker 读取页数和元数据。
+ * pdfuse-core 的 loadPdfDocument 由 pdf-tools.inspectPdf 间接调用。
  */
 async function addFiles(inputFiles: File[]) {
   const validFiles = inputFiles.filter(isPdfFile)
@@ -160,18 +125,17 @@ async function addFiles(inputFiles: File[]) {
 
   let candidates: File[]
 
-  if (props.activeTool === 'merge') {
+  if (allowMultipleFiles.value) {
     const existingKeys = new Set(fileItems.value.map((item) => getFileKey(item.file)))
     const uniqueFiles = validFiles.filter((file) => !existingKeys.has(getFileKey(file)))
-    const remainingSlots = Math.max(0, 20 - fileItems.value.length)
+    const remainingSlots = Math.max(0, 30 - fileItems.value.length)
 
     if (uniqueFiles.length > remainingSlots) {
-      ElMessage.warning('单次最多合并 20 个 PDF 文件。')
+      ElMessage.warning('单次最多合并 30 个 PDF 文件。')
     }
 
     candidates = uniqueFiles.slice(0, remainingSlots)
   } else {
-    // 拆分与课表转换都针对单个文档，因此直接替换旧文件。
     candidates = validFiles.slice(0, 1)
   }
 
@@ -180,33 +144,38 @@ async function addFiles(inputFiles: File[]) {
     return
   }
 
-  // 先建立列表项，让用户立刻看到文件名，再异步读取页数。
   const newItems: PdfFileItem[] = candidates.map((file) => ({
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     file,
     status: 'loading',
   }))
 
-  fileItems.value = props.activeTool === 'merge' ? [...fileItems.value, ...newItems] : newItems
-  generatedFile.value = null
+  fileItems.value = allowMultipleFiles.value ? [...fileItems.value, ...newItems] : newItems
 
-  // Promise.all 同时读取多个文件的页数，处理结束后分别更新各自状态。
+  result.value = null
+  previewPage.value = 1
+
   await Promise.all(
     newItems.map(async (item) => {
-      try {
-        const pageCount = await getPdfPageCount(item.file)
+      const reactiveItem = fileItems.value.find((currentItem) => currentItem.id === item.id)
+      if (!reactiveItem) return
 
-        // 必须从 fileItems.value 中取得 Vue 包装后的对象再赋值，界面才会实时刷新。
-        const reactiveItem = fileItems.value.find((currentItem) => currentItem.id === item.id)
-        if (reactiveItem) {
-          reactiveItem.pageCount = pageCount
-          reactiveItem.status = 'ready'
+      try {
+        // inspectPdf 使用 Worker + pdfuse-core，页数读取不会阻塞页面。
+        const inspection = await inspectPdf(reactiveItem)
+        reactiveItem.inspection = inspection
+        reactiveItem.pageCount = inspection.pageCount
+        reactiveItem.status = 'ready'
+
+        // 元数据工具打开后直接使用当前文档信息预填。
+        if (props.activeTool === 'metadata' && reactiveItem.id === fileItems.value[0]?.id) {
+          toolOptions.metadataTitle = inspection.title
+          toolOptions.metadataAuthor = inspection.author
+          toolOptions.metadataSubject = inspection.subject
+          toolOptions.metadataKeywords = inspection.keywords
         }
       } catch {
-        const reactiveItem = fileItems.value.find((currentItem) => currentItem.id === item.id)
-        if (reactiveItem) {
-          reactiveItem.status = 'error'
-        }
+        reactiveItem.status = 'error'
       }
     }),
   )
@@ -214,29 +183,29 @@ async function addFiles(inputFiles: File[]) {
   ElMessage.success(`已添加 ${newItems.length} 个 PDF 文件。`)
 }
 
-// 处理 input 的 change 事件，并在读取后清空 value，保证同一个文件可以再次选择。
+// input change 后清空 value，保证同一个文件可以再次被选择。
 async function handleInputChange(event: Event) {
   const input = event.target as HTMLInputElement
   await addFiles(Array.from(input.files ?? []))
   input.value = ''
 }
 
-// 处理拖拽释放。
+// 拖拽释放时读取 DataTransfer 中的文件。
 async function handleDrop(event: DragEvent) {
   isDragging.value = false
-  const droppedFiles = Array.from(event.dataTransfer?.files ?? [])
-  await addFiles(droppedFiles)
+  await addFiles(Array.from(event.dataTransfer?.files ?? []))
 }
 
-// 删除指定文件。
+// 删除队列中的文件。
 function removeFile(fileId: string) {
   fileItems.value = fileItems.value.filter((item) => item.id !== fileId)
-  generatedFile.value = null
+  result.value = null
+  previewPage.value = 1
 }
 
 /**
  * 调整合并顺序。
- * direction 为 -1 表示上移，1 表示下移。
+ * direction = -1 表示上移，1 表示下移。
  */
 function moveFile(index: number, direction: -1 | 1) {
   const targetIndex = index + direction
@@ -251,23 +220,26 @@ function moveFile(index: number, direction: -1 | 1) {
   nextItems[index] = targetItem
   nextItems[targetIndex] = currentItem
   fileItems.value = nextItems
-  generatedFile.value = null
+  result.value = null
 }
 
-// 清空所有输入状态，方便重新开始一次处理。
+// 清空文件、参数、结果和预览状态。
 function resetWorkspace() {
   fileItems.value = []
-  generatedFile.value = null
+  result.value = null
   progress.value = 0
+  previewPage.value = 1
   isDragging.value = false
-  pageRange.value = '1-3'
+  Object.assign(toolOptions, createDefaultPdfToolOptions())
 }
 
 /**
- * 根据当前工具调用对应处理函数。
- * 所有浏览器的同步错误和 Promise 异常都会在这里统一转换为用户提示。
+ * 调用统一 PDF 工具入口。
+ * 所有真实处理逻辑都在 pdf-tools.ts 和 Web Worker 内，组件只负责状态。
  */
 async function processFiles() {
+  if (props.activeTool === 'watermark') return
+
   if (fileItems.value.length === 0) {
     ElMessage.warning('请先添加 PDF 文件。')
     return
@@ -278,104 +250,91 @@ async function processFiles() {
     return
   }
 
-  const firstItem = fileItems.value[0]
-
-  if (!firstItem) {
-    ElMessage.warning('没有可处理的文件。')
+  const readyFiles = fileItems.value.filter((item) => item.status === 'ready')
+  if (readyFiles.length !== fileItems.value.length) {
+    ElMessage.warning('仍有文件正在读取，请稍后再处理。')
     return
   }
 
   isProcessing.value = true
   progress.value = 4
-  generatedFile.value = null
+  result.value = null
 
   try {
-    if (props.activeTool === 'split') {
-      generatedFile.value = await splitPdf(firstItem, pageRange.value, (percent) => {
+    const tool = props.activeTool as PdfToolKey
+    const nextResult = await processPdfTool(
+      tool,
+      fileItems.value,
+      toolOptions,
+      previewPage.value,
+      (percent) => {
         progress.value = percent
-      })
-    } else if (props.activeTool === 'merge') {
-      generatedFile.value = await mergePdfs(fileItems.value, (percent) => {
-        progress.value = percent
-      })
-    } else if (props.activeTool === 'schedule') {
-      generatedFile.value = await convertPdfScheduleToExcel(firstItem, (percent) => {
-        progress.value = percent
-      })
-    }
+      },
+    )
 
-    ElMessage.success('处理完成，可以下载结果了。')
+    result.value = nextResult
+    ElMessage.success('处理完成。')
   } catch (error) {
-    // 工具函数会主动抛出中文错误，这里优先展示该错误；其他异常使用通用文案。
-    const message = error instanceof Error ? error.message : '处理失败，请检查 PDF 文件是否完整。'
+    const message = error instanceof Error ? error.message : 'PDF 处理失败。'
     ElMessage.error(message)
   } finally {
     isProcessing.value = false
   }
 }
 
-// 使用临时 Object URL 触发浏览器下载，并在下载开始后释放内存。
-function downloadGeneratedFile() {
-  if (!generatedFile.value) return
+// 使用临时 Object URL 下载结果，下载开始后释放资源。
+function downloadResult() {
+  if (!result.value || result.value.kind !== 'file') return
 
-  const objectUrl = URL.createObjectURL(generatedFile.value.blob)
+  const objectUrl = URL.createObjectURL(result.value.blob)
   const anchor = document.createElement('a')
   anchor.href = objectUrl
-  anchor.download = generatedFile.value.filename
+  anchor.download = result.value.filename
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()
-
-  // 延迟释放可以兼容部分浏览器，避免刚点击下载就移除资源。
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
 }
 </script>
 
 <template>
   <section class="workspace-panel">
-    <!-- 工作台标题会随左侧菜单同步变化。 -->
     <header class="workspace-heading">
       <div class="heading-main">
         <span class="section-index">02</span>
         <span class="heading-icon">
           <el-icon :size="21">
-            <component :is="activeTool === 'watermark' ? MagicStick : currentMeta.icon" />
+            <component :is="currentMeta?.icon ?? MagicStick" />
           </el-icon>
         </span>
 
         <div>
-          <h2>{{ activeTool === 'watermark' ? '图片水印处理' : currentMeta.title }}</h2>
+          <h2>{{ currentMeta?.title ?? '图片水印处理' }}</h2>
           <p>
-            {{
-              activeTool === 'watermark'
-                ? '该功能暂时不需要实现，当前仅保留入口'
-                : currentMeta.subtitle
-            }}
+            {{ currentMeta?.subtitle ?? '该功能暂时不需要实现，当前仅保留入口' }}
           </p>
         </div>
       </div>
 
-      <!-- 本地处理提示放在右上角，操作过程中始终可见。 -->
-      <span v-if="activeTool !== 'watermark'" class="local-badge">
+      <span v-if="currentMeta" class="local-badge">
         <el-icon :size="13"><CircleCheck /></el-icon>
-        本地处理
+        Worker 本地处理
       </span>
     </header>
 
-    <!-- 水印功能只显示预留状态，不创建文件输入或处理逻辑。 -->
+    <!-- 图片水印仍然是预留状态。 -->
     <div v-if="activeTool === 'watermark'" class="coming-soon-panel">
       <span class="coming-icon">
         <el-icon :size="34"><MagicStick /></el-icon>
       </span>
       <h3>图片水印功能正在准备</h3>
-      <p>当前版本只保留菜单入口，后续可以直接在这个区域加入预览、位置和透明度设置。</p>
-      <el-button type="primary" plain @click="emit('select-tool', 'split')">
-        返回 PDF 拆分
+      <p>当前版本保留菜单入口，后续可以直接在这里加入图片上传、预览和透明度设置。</p>
+      <el-button type="primary" plain @click="emit('select-tool', 'merge')">
+        返回 PDF 合并
       </el-button>
     </div>
 
     <template v-else>
-      <!-- 隐藏的文件选择框由普通按钮和拖拽区域间接触发。 -->
       <input
         ref="fileInputRef"
         class="hidden-file-input"
@@ -385,7 +344,7 @@ function downloadGeneratedFile() {
         @change="handleInputChange"
       />
 
-      <!-- 拖拽区域是核心入口，边框和背景会在拖拽进入时改变。 -->
+      <!-- 统一拖拽入口 -->
       <div
         class="drop-zone"
         :class="{ dragging: isDragging }"
@@ -400,15 +359,16 @@ function downloadGeneratedFile() {
         </span>
 
         <div class="drop-copy">
-          <strong>{{ currentMeta.dropTitle }}</strong>
-          <small>{{ currentMeta.dropHint }}</small>
+          <strong>{{
+            allowMultipleFiles ? '拖入两个或更多 PDF 文件' : '拖入一个 PDF 文件'
+          }}</strong>
+          <small>支持标准 PDF；大文件会在独立 Worker 中处理</small>
         </div>
 
-        <!-- 阻止按钮点击冒泡后重复打开文件选择框。 -->
         <el-button type="primary" :icon="Plus" @click.stop="openFilePicker"> 选择文件 </el-button>
       </div>
 
-      <!-- 文件队列按添加顺序显示；合并模式可以调整顺序。 -->
+      <!-- 文件队列 -->
       <div v-if="fileItems.length > 0" class="file-queue">
         <div class="queue-heading">
           <strong>待处理文件</strong>
@@ -424,13 +384,12 @@ function downloadGeneratedFile() {
             <strong :title="item.file.name">{{ item.file.name }}</strong>
             <span>
               {{ formatFileSize(item.file.size) }}
-              <template v-if="item.status === 'loading'">· 正在读取页数</template>
+              <template v-if="item.status === 'loading'">· 正在读取文档</template>
               <template v-else-if="item.status === 'ready'"> · {{ item.pageCount }} 页 </template>
               <template v-else>· 文件无法读取</template>
             </span>
           </div>
 
-          <!-- 合并模式提供排序按钮，其他模式不需要显示。 -->
           <div v-if="activeTool === 'merge'" class="order-actions">
             <el-tooltip content="上移" placement="top">
               <el-button
@@ -471,41 +430,81 @@ function downloadGeneratedFile() {
         </article>
       </div>
 
-      <!-- 拆分模式额外显示页码范围输入。 -->
-      <div v-if="activeTool === 'split'" class="option-panel">
-        <div class="option-copy">
-          <strong>需要保留的页码</strong>
-          <span>例如：1-3,5 表示提取第 1、2、3、5 页</span>
-        </div>
-        <el-input
-          v-model="pageRange"
-          class="range-input"
-          placeholder="1-3,5"
-          aria-label="PDF 拆分页码"
-        />
-      </div>
+      <!-- 根据工具显示对应参数。 -->
+      <PdfToolOptionsPanel v-if="currentMeta" :tool="currentMeta.key" :options="toolOptions" />
 
-      <!-- 课表转换对 PDF 类型有明确要求，因此在提交前展示提示。 -->
+      <!--
+        每个工具共用同一套“处理前 / 处理后”预览。
+        预览不再是独立功能，而属于当前工具的结果对照区域。
+      -->
+      <PdfEffectPreview
+        v-if="fileItems.length > 0 && fileItems[0]?.status === 'ready'"
+        v-model:before-page="previewPage"
+        :sources="previewSources"
+        :result="result"
+      />
+
+      <!-- 课表转换提示 -->
       <div v-if="activeTool === 'schedule'" class="format-note">
         <el-icon :size="16"><Grid /></el-icon>
-        <span>当前算法会还原横纵行列；扫描图片课表、复杂合并单元格需要导出后人工校正。</span>
+        <span>支持文字型 PDF；扫描图片、复杂合并单元格可能需要导出后人工校正。</span>
       </div>
 
-      <!-- 处理完成后展示文件摘要和下载按钮。 -->
-      <div v-if="generatedFile" class="result-card">
+      <!-- 文件类结果 -->
+      <div v-if="result?.kind === 'file'" class="result-card">
         <span class="result-icon">
           <el-icon :size="23"><CircleCheck /></el-icon>
         </span>
         <div class="result-copy">
-          <strong>{{ generatedFile.filename }}</strong>
-          <span>{{ generatedFile.description }}</span>
+          <strong>{{ result.filename }}</strong>
+          <span>{{ result.description }}</span>
         </div>
-        <el-button type="success" :icon="Download" @click="downloadGeneratedFile">
-          下载结果
-        </el-button>
+        <el-button type="success" :icon="Download" @click="downloadResult"> 下载结果 </el-button>
       </div>
 
-      <!-- 处理中或已有进度时显示进度条。 -->
+      <!-- 文档体检结果 -->
+      <div v-else-if="result?.kind === 'info'" class="inspection-card">
+        <div class="inspection-heading">
+          <span class="result-icon">
+            <el-icon :size="23"><CircleCheck /></el-icon>
+          </span>
+          <div class="result-copy">
+            <strong>{{ result.title }}</strong>
+            <span>{{ result.description }}</span>
+          </div>
+        </div>
+
+        <dl class="inspection-grid">
+          <div>
+            <dt>页数</dt>
+            <dd>{{ result.inspection.pageCount }}</dd>
+          </div>
+          <div>
+            <dt>页面尺寸</dt>
+            <dd>
+              {{ result.inspection.pageSize.width }} × {{ result.inspection.pageSize.height }} 点
+            </dd>
+          </div>
+          <div>
+            <dt>标题</dt>
+            <dd>{{ result.inspection.title || '未设置' }}</dd>
+          </div>
+          <div>
+            <dt>作者</dt>
+            <dd>{{ result.inspection.author || '未设置' }}</dd>
+          </div>
+          <div>
+            <dt>主题</dt>
+            <dd>{{ result.inspection.subject || '未设置' }}</dd>
+          </div>
+          <div>
+            <dt>关键词</dt>
+            <dd>{{ result.inspection.keywords || '未设置' }}</dd>
+          </div>
+        </dl>
+      </div>
+
+      <!-- 处理进度 -->
       <div v-if="isProcessing || progress > 0" class="progress-wrap">
         <div class="progress-label">
           <span>{{ isProcessing ? '正在处理，请稍候' : '处理完成' }}</span>
@@ -519,19 +518,19 @@ function downloadGeneratedFile() {
         />
       </div>
 
-      <!-- 底部操作区固定在内容流中，不遮挡拖拽区。 -->
       <footer class="workspace-actions">
         <el-button :disabled="isProcessing || fileItems.length === 0" @click="resetWorkspace">
           清空
         </el-button>
+
         <el-button
           type="primary"
-          :icon="currentMeta.icon"
+          :icon="currentMeta?.icon"
           :loading="isProcessing"
           :disabled="fileItems.length === 0"
           @click="processFiles"
         >
-          {{ isProcessing ? '处理中...' : currentMeta.actionText }}
+          {{ isProcessing ? '处理中...' : currentMeta?.actionText }}
         </el-button>
       </footer>
     </template>
@@ -539,9 +538,8 @@ function downloadGeneratedFile() {
 </template>
 
 <style scoped>
-/* 工作台是最主要的视觉区域，因此设置为独立白色表面并保留充足内边距。 */
 .workspace-panel {
-  min-height: 590px;
+  min-height: 620px;
   padding: 20px;
   background: var(--bm-surface);
   border: 1px solid var(--bm-border);
@@ -597,7 +595,6 @@ function downloadGeneratedFile() {
   line-height: 1.5;
 }
 
-/* “本地处理”标记使用绿色，传达隐私与安全信息。 */
 .local-badge {
   padding: 5px 8px;
   display: flex;
@@ -611,21 +608,19 @@ function downloadGeneratedFile() {
   white-space: nowrap;
 }
 
-/* 隐藏原生 file input，视觉交互完全交给自定义区域。 */
 .hidden-file-input {
   display: none;
 }
 
-/* 拖拽区域高度稳定，进入拖拽状态时不会因边框变化而跳动。 */
 .drop-zone {
-  min-height: 176px;
+  min-height: 158px;
   margin-top: 16px;
-  padding: 24px;
+  padding: 22px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 13px;
+  gap: 12px;
   color: var(--bm-text);
   background: var(--bm-surface-soft);
   border: 1px dashed var(--bm-border-strong);
@@ -644,15 +639,13 @@ function downloadGeneratedFile() {
   border-color: var(--bm-primary);
 }
 
-/* 拖拽时只做轻微上移，不改变整体尺寸。 */
 .drop-zone.dragging {
   transform: translateY(-2px);
 }
 
-/* 上传图标使用固定圆形容器。 */
 .drop-icon {
-  width: 58px;
-  height: 58px;
+  width: 54px;
+  height: 54px;
   display: grid;
   place-items: center;
   color: var(--bm-primary);
@@ -664,20 +657,19 @@ function downloadGeneratedFile() {
 .drop-copy {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
 }
 
 .drop-copy strong {
   color: var(--bm-text-strong);
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .drop-copy small {
   color: var(--bm-text-faint);
-  font-size: 11px;
+  font-size: 10px;
 }
 
-/* 文件队列外框保持紧凑，内容多时可以内部滚动。 */
 .file-queue {
   margin-top: 14px;
   padding: 11px;
@@ -705,7 +697,6 @@ function downloadGeneratedFile() {
   white-space: nowrap;
 }
 
-/* 每个文件独占一行，长文件名会被省略，不挤压右侧按钮。 */
 .file-item {
   min-height: 52px;
   padding: 7px;
@@ -758,59 +749,11 @@ function downloadGeneratedFile() {
   gap: 1px;
 }
 
-/* 删除按钮使用警示色，但仅在悬停或聚焦时明显。 */
 .remove-button:hover {
   color: var(--bm-danger);
   background: var(--bm-danger-soft);
 }
 
-/* 拆分页码范围采用横向布局，左侧解释、右侧输入。 */
-.option-panel {
-  margin-top: 14px;
-  padding: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  background: var(--bm-surface-soft);
-  border: 1px solid var(--bm-border);
-  border-radius: 9px;
-}
-
-.option-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.option-copy strong {
-  color: var(--bm-text-strong);
-  font-size: 11px;
-}
-
-.option-copy span {
-  color: var(--bm-text-faint);
-  font-size: 9px;
-  line-height: 1.4;
-}
-
-.range-input {
-  width: 146px;
-  flex: 0 0 146px;
-}
-
-/* 统一适配 Element Plus 输入框的主题颜色。 */
-.range-input :deep(.el-input__wrapper) {
-  background: var(--bm-surface);
-  box-shadow: 0 0 0 1px var(--bm-border-strong) inset;
-}
-
-.range-input :deep(.el-input__inner) {
-  color: var(--bm-text-strong);
-}
-
-/* 课表格式提示使用低饱和强调色，不打断操作流程。 */
 .format-note {
   margin-top: 12px;
   padding: 10px 11px;
@@ -825,16 +768,19 @@ function downloadGeneratedFile() {
   line-height: 1.55;
 }
 
-/* 处理结果卡片横向排列，下载按钮右对齐。 */
-.result-card {
+.result-card,
+.inspection-card {
   margin-top: 14px;
   padding: 11px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
   background: var(--bm-success-soft);
   border: 1px solid var(--bm-success-border);
   border-radius: 9px;
+}
+
+.result-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .result-icon {
@@ -869,7 +815,41 @@ function downloadGeneratedFile() {
   font-size: 9px;
 }
 
-/* 进度区域高度固定，出现和消失时不会造成明显跳动。 */
+.inspection-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.inspection-grid {
+  margin: 13px 0 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.inspection-grid div {
+  min-width: 0;
+  padding: 9px;
+  background: var(--bm-surface);
+  border: 1px solid var(--bm-success-border);
+  border-radius: 7px;
+}
+
+.inspection-grid dt {
+  color: var(--bm-text-faint);
+  font-size: 9px;
+}
+
+.inspection-grid dd {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--bm-text-strong);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .progress-wrap {
   margin-top: 14px;
   padding: 10px 11px;
@@ -891,7 +871,6 @@ function downloadGeneratedFile() {
   color: var(--bm-primary);
 }
 
-/* 操作按钮放在右下角，符合常见工作台的操作习惯。 */
 .workspace-actions {
   margin-top: 18px;
   padding-top: 15px;
@@ -901,7 +880,6 @@ function downloadGeneratedFile() {
   border-top: 1px solid var(--bm-border);
 }
 
-/* 水印功能占位区域保持与工作台一致的高度，不出现空壳感。 */
 .coming-soon-panel {
   min-height: 430px;
   padding: 60px 28px;
@@ -939,15 +917,16 @@ function downloadGeneratedFile() {
   line-height: 1.7;
 }
 
-/* 手机端缩小主面板内边距，让 320px 宽度也能正常使用。 */
+@media (max-width: 760px) {
+  .inspection-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 560px) {
   .workspace-panel {
     min-height: 520px;
     padding: 14px;
-  }
-
-  .workspace-heading {
-    gap: 10px;
   }
 
   .local-badge {
@@ -955,19 +934,8 @@ function downloadGeneratedFile() {
   }
 
   .drop-zone {
-    min-height: 190px;
-    padding: 20px 14px;
-  }
-
-  .option-panel {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 9px;
-  }
-
-  .range-input {
-    width: 100%;
-    flex-basis: auto;
+    min-height: 180px;
+    padding: 18px 14px;
   }
 
   .result-card {
@@ -977,6 +945,10 @@ function downloadGeneratedFile() {
 
   .result-card :deep(.el-button) {
     width: 100%;
+  }
+
+  .inspection-grid {
+    grid-template-columns: 1fr;
   }
 
   .workspace-actions :deep(.el-button) {

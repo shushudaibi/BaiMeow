@@ -14,7 +14,7 @@ import CommentSection from '@/components/workspace/CommentSection.vue'
 import ThemeSettingsDrawer from '@/components/settings/ThemeSettingsDrawer.vue'
 import type { ToolKey } from '@/types/pdf'
 
-// 当前选中的功能键。默认打开 PDF 拆分，与左侧菜单默认展开 PDF 分组保持一致。
+// 当前选中的功能键。默认打开常用功能中的 PDF 拆分。
 const activeTool = ref<ToolKey>('split')
 
 // 控制右侧设置抽屉是否显示。
@@ -28,6 +28,7 @@ const settingsVisible = ref(false)
       两块内容有共同宽度和圆角，因此看起来是一体式页头。
     -->
     <section class="top-panel">
+      <!-- 完整写法是 v-on:open-settings，简写成 @open-settings,表示监听 open-settings 事件。 -->
       <AppHeader @open-settings="settingsVisible = true" />
       <NoticeBar />
     </section>
@@ -92,7 +93,7 @@ const settingsVisible = ref(false)
 */
 .workspace-layout {
   display: grid;
-  grid-template-columns: 236px minmax(0, 1fr) 310px;
+  grid-template-columns: 260px minmax(0, 1fr) 310px;
   gap: 18px;
   align-items: start;
 }

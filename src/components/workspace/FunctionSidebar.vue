@@ -1,105 +1,60 @@
 <!--
-  FunctionSidebar.vue 是功能选择区。
-  PDF 分组默认展开，图片分组默认收起；点击菜单项后向父组件发送 ToolKey。
+  FunctionSidebar.vue 是三级功能菜单。
+
+  层级结构：
+  1. PDF 文件处理 / 图片处理；
+  2. 常用功能、页面管理、内容与版式、信息与导出；
+  3. 具体工具按钮。
+
+  PDF 顶层默认展开，二级分类中只默认展开“常用功能”，
+  页面管理、内容与版式、信息与导出首次进入时保持收起。
 -->
 <script setup lang="ts">
-import { ref, type Component } from 'vue'
-import { ArrowRight, Connection, Document, Grid, Picture, Scissor } from '@element-plus/icons-vue'
+import { ref } from 'vue'
+import { ArrowRight, Document, Picture } from '@element-plus/icons-vue'
+import { PDF_TOOL_CATEGORIES } from '@/config/pdf-tools'
 import type { ToolKey } from '@/types/pdf'
 
-// 使用 props 接收当前工具，确保菜单高亮与工作区内容同步。
+// 接收当前工具，保证菜单高亮与工作台内容保持同步。
 const props = defineProps<{
   activeTool: ToolKey
 }>()
 
-// 仅发送工具名称，具体切换逻辑由页面负责。
+// 工具按钮只向页面发送 key，不直接修改父组件状态。
 const emit = defineEmits<{
   'select-tool': [tool: ToolKey]
 }>()
 
-// 内部菜单项的完整数据结构。
-interface ToolItem {
-  key: ToolKey
-  label: string
-  description: string
-  icon: Component
-  comingSoon?: boolean
-}
-
-// 分组结构让菜单可以继续增加“文本处理”“转换工具”等分类。
-interface ToolGroup {
-  key: 'pdf' | 'image'
-  label: string
-  description: string
-  icon: Component
-  tools: ToolItem[]
-}
-
-// 菜单配置与模板分离，后续新增功能只需要增加一个对象。
-const toolGroups: ToolGroup[] = [
-  {
-    key: 'pdf',
-    label: 'PDF 文件处理',
-    description: '拆分、合并与表格转换',
-    icon: Document,
-    tools: [
-      {
-        key: 'split',
-        label: 'PDF 拆分',
-        description: '按页码范围提取页面',
-        icon: Scissor,
-      },
-      {
-        key: 'merge',
-        label: 'PDF 合并',
-        description: '按顺序组合多个文档',
-        icon: Connection,
-      },
-      {
-        key: 'schedule',
-        label: 'PDF 课表转 Excel',
-        description: '提取文字型课表',
-        icon: Grid,
-      },
-    ],
-  },
-  {
-    key: 'image',
-    label: '图片处理',
-    description: '图片视觉工具',
-    icon: Picture,
-    tools: [
-      {
-        key: 'watermark',
-        label: '图片水印处理',
-        description: '功能预留，暂未开放',
-        icon: Picture,
-        comingSoon: true,
-      },
-    ],
-  },
-]
-
-// PDF 默认展开；Set 便于之后增加更多展开分组。
+// PDF 顶层默认展开。
 const expandedGroups = ref<Set<string>>(new Set(['pdf']))
 
-/**
- * 展开或收起指定分组。
- * 使用 Set 的 has/add/delete 方法，避免重复添加同一分组。
- */
-function toggleGroup(groupKey: string) {
-  const nextGroups = new Set(expandedGroups.value)
+// 二级分类只默认展开“常用功能”，其他分类由用户按需展开。
+const expandedCategories = ref<Set<string>>(new Set(['common']))
 
-  if (nextGroups.has(groupKey)) {
-    nextGroups.delete(groupKey)
+/**
+ * 通用展开切换函数。
+ * 每次创建新的 Set 再赋值，确保 Vue 能检测到集合变化并刷新界面。
+ */
+function toggleSetValue(target: Set<string>, value: string): Set<string> {
+  const nextValue = new Set(target)
+
+  if (nextValue.has(value)) {
+    nextValue.delete(value)
   } else {
-    nextGroups.add(groupKey)
+    nextValue.add(value)
   }
 
-  expandedGroups.value = nextGroups
+  return nextValue
 }
 
-// 把用户选择交给父组件。水印功能也可以进入，工作区会展示“暂未开放”。
+function toggleGroup(groupKey: string) {
+  expandedGroups.value = toggleSetValue(expandedGroups.value, groupKey)
+}
+
+function toggleCategory(categoryKey: string) {
+  expandedCategories.value = toggleSetValue(expandedCategories.value, categoryKey)
+}
+
 function selectTool(toolKey: ToolKey) {
   emit('select-tool', toolKey)
 }
@@ -111,55 +66,124 @@ function selectTool(toolKey: ToolKey) {
       <span class="heading-index">01</span>
       <div>
         <h2>功能选择</h2>
-        <p>选择一个处理工具</p>
+        <p>常用功能与细分工具</p>
       </div>
     </div>
 
-    <!-- 使用自定义折叠菜单，方便精细控制分组标题和二级项目样式。 -->
     <nav class="tool-nav" aria-label="功能菜单">
-      <section v-for="group in toolGroups" :key="group.key" class="tool-group">
+      <!-- PDF 顶层分组 -->
+      <section class="tool-group">
         <button
           type="button"
           class="group-toggle"
-          :aria-expanded="expandedGroups.has(group.key)"
-          @click="toggleGroup(group.key)"
+          :aria-expanded="expandedGroups.has('pdf')"
+          @click="toggleGroup('pdf')"
         >
           <span class="group-icon">
-            <el-icon :size="18"><component :is="group.icon" /></el-icon>
+            <el-icon :size="18"><Document /></el-icon>
           </span>
 
           <span class="group-copy">
-            <strong>{{ group.label }}</strong>
-            <small>{{ group.description }}</small>
+            <strong>PDF 文件处理</strong>
+            <small>预览、组织、编辑与导出</small>
+          </span>
+
+          <el-icon class="group-arrow" :class="{ expanded: expandedGroups.has('pdf') }" :size="14">
+            <ArrowRight />
+          </el-icon>
+        </button>
+
+        <!-- PDF 三级菜单。每个分类本身也是可独立收起的按钮。 -->
+        <div v-show="expandedGroups.has('pdf')" class="category-list">
+          <section
+            v-for="category in PDF_TOOL_CATEGORIES"
+            :key="category.key"
+            class="tool-category"
+          >
+            <button
+              type="button"
+              class="category-toggle"
+              :aria-expanded="expandedCategories.has(category.key)"
+              @click="toggleCategory(category.key)"
+            >
+              <span class="category-icon">
+                <el-icon :size="15"><component :is="category.icon" /></el-icon>
+              </span>
+
+              <span class="category-copy">
+                <strong>{{ category.label }}</strong>
+                <small>{{ category.description }}</small>
+              </span>
+
+              <el-icon
+                class="category-arrow"
+                :class="{ expanded: expandedCategories.has(category.key) }"
+                :size="12"
+              >
+                <ArrowRight />
+              </el-icon>
+            </button>
+
+            <div v-show="expandedCategories.has(category.key)" class="category-items">
+              <button
+                v-for="tool in category.tools"
+                :key="tool.key"
+                type="button"
+                class="tool-item"
+                :class="{ active: props.activeTool === tool.key }"
+                @click="selectTool(tool.key)"
+              >
+                <el-icon :size="15"><component :is="tool.icon" /></el-icon>
+
+                <span class="tool-item-copy">
+                  <span>{{ tool.label }}</span>
+                  <small>{{ tool.description }}</small>
+                </span>
+              </button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <!-- 图片处理顶层分组，当前只保留水印入口。 -->
+      <section class="tool-group image-group">
+        <button
+          type="button"
+          class="group-toggle"
+          :aria-expanded="expandedGroups.has('image')"
+          @click="toggleGroup('image')"
+        >
+          <span class="group-icon image-icon">
+            <el-icon :size="18"><Picture /></el-icon>
+          </span>
+
+          <span class="group-copy">
+            <strong>图片处理</strong>
+            <small>图片视觉工具</small>
           </span>
 
           <el-icon
             class="group-arrow"
-            :class="{ expanded: expandedGroups.has(group.key) }"
+            :class="{ expanded: expandedGroups.has('image') }"
             :size="14"
           >
             <ArrowRight />
           </el-icon>
         </button>
 
-        <!-- v-show 保留子项 DOM，展开收起时不会重新创建按钮。 -->
-        <div v-show="expandedGroups.has(group.key)" class="tool-items">
+        <div v-show="expandedGroups.has('image')" class="category-list image-tools">
           <button
-            v-for="tool in group.tools"
-            :key="tool.key"
             type="button"
             class="tool-item"
-            :class="{ active: props.activeTool === tool.key }"
-            @click="selectTool(tool.key)"
+            :class="{ active: props.activeTool === 'watermark' }"
+            @click="selectTool('watermark')"
           >
-            <el-icon :size="16"><component :is="tool.icon" /></el-icon>
-
+            <el-icon :size="15"><Picture /></el-icon>
             <span class="tool-item-copy">
-              <span>{{ tool.label }}</span>
-              <small>{{ tool.description }}</small>
+              <span>图片水印处理</span>
+              <small>功能预留，暂未开放</small>
             </span>
-
-            <span v-if="tool.comingSoon" class="coming-tag">待开放</span>
+            <span class="coming-tag">待开放</span>
           </button>
         </div>
       </section>
@@ -168,7 +192,7 @@ function selectTool(toolKey: ToolKey) {
 </template>
 
 <style scoped>
-/* 侧栏是独立表面容器，与中间工作台和右侧广告形成平行关系。 */
+/* 侧栏是独立表面容器，与工作台、广告栏形成三栏布局。 */
 .function-sidebar {
   padding: 16px;
   background: var(--bm-surface);
@@ -177,7 +201,6 @@ function selectTool(toolKey: ToolKey) {
   box-shadow: var(--bm-shadow-soft);
 }
 
-/* 标题区使用序号和小标题，让功能够清晰但不过度装饰。 */
 .sidebar-heading {
   padding: 2px 2px 14px;
   display: flex;
@@ -211,14 +234,13 @@ function selectTool(toolKey: ToolKey) {
   margin-top: 12px;
 }
 
-/* 分组之间留出明确间距，方便快速扫描。 */
 .tool-group + .tool-group {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--bm-border);
 }
 
-/* 一级分组按钮铺满宽度，并保持可点击区域至少 48px。 */
+/* 一级分组按钮 */
 .group-toggle {
   width: 100%;
   min-height: 48px;
@@ -238,7 +260,6 @@ function selectTool(toolKey: ToolKey) {
   background: var(--bm-surface-soft);
 }
 
-/* 分组图标使用浅色方块承载，增强层级。 */
 .group-icon {
   width: 32px;
   height: 32px;
@@ -248,6 +269,11 @@ function selectTool(toolKey: ToolKey) {
   color: var(--bm-primary);
   background: var(--bm-primary-soft);
   border-radius: 8px;
+}
+
+.image-icon {
+  color: var(--bm-accent);
+  background: var(--bm-accent-soft);
 }
 
 .group-copy {
@@ -272,38 +298,98 @@ function selectTool(toolKey: ToolKey) {
   white-space: nowrap;
 }
 
-/* 箭头默认指向右侧，展开后旋转 90 度指向下方。 */
-.group-arrow {
+.group-arrow,
+.category-arrow {
   flex: 0 0 auto;
   color: var(--bm-text-faint);
   transition: transform 0.2s ease;
 }
 
-.group-arrow.expanded {
+.group-arrow.expanded,
+.category-arrow.expanded {
   transform: rotate(90deg);
 }
 
-/* 二级项目向右缩进，并在左侧保留层级线。 */
-.tool-items {
+/* 二级分类列表保留左侧层级线。 */
+.category-list {
   margin: 5px 0 0 16px;
-  padding-left: 12px;
-  display: grid;
-  gap: 5px;
+  padding-left: 10px;
   border-left: 1px solid var(--bm-border-strong);
 }
 
-/* 二级菜单按钮使用紧凑的 42px 高度，适合频繁切换。 */
-.tool-item {
+/* 分类按钮比一级按钮更紧凑，但仍保证可点击高度。 */
+.category-toggle {
   width: 100%;
-  min-height: 42px;
-  padding: 6px 8px;
+  min-height: 40px;
+  padding: 5px 6px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
+  color: var(--bm-text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.category-toggle:hover {
+  color: var(--bm-text-strong);
+  background: var(--bm-surface-soft);
+}
+
+.category-icon {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  display: grid;
+  place-items: center;
+  color: var(--bm-primary);
+  background: var(--bm-primary-soft);
+  border-radius: 7px;
+}
+
+.category-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.category-copy strong {
+  color: var(--bm-text-strong);
+  font-size: 11px;
+}
+
+.category-copy small {
+  overflow: hidden;
+  color: var(--bm-text-faint);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 具体工具列表再缩进一层。 */
+.category-items {
+  margin: 4px 0 6px 13px;
+  padding-left: 8px;
+  display: grid;
+  gap: 4px;
+  border-left: 1px dashed var(--bm-border-strong);
+}
+
+.tool-item {
+  width: 100%;
+  min-height: 38px;
+  padding: 5px 7px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
   color: var(--bm-text-muted);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 7px;
   cursor: pointer;
   text-align: left;
 }
@@ -313,7 +399,6 @@ function selectTool(toolKey: ToolKey) {
   background: var(--bm-surface-soft);
 }
 
-/* 当前工具使用主题色边框与浅色背景，状态非常明确。 */
 .tool-item.active {
   color: var(--bm-primary);
   background: var(--bm-primary-soft);
@@ -330,7 +415,7 @@ function selectTool(toolKey: ToolKey) {
 
 .tool-item-copy > span {
   overflow: hidden;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -339,12 +424,11 @@ function selectTool(toolKey: ToolKey) {
 .tool-item-copy small {
   overflow: hidden;
   color: var(--bm-text-faint);
-  font-size: 9px;
+  font-size: 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* “待开放”标签让用户明确知道这是预留功能。 */
 .coming-tag {
   padding: 2px 5px;
   flex: 0 0 auto;
@@ -354,35 +438,30 @@ function selectTool(toolKey: ToolKey) {
   font-size: 9px;
 }
 
-/* 在平板横向排列时，侧栏能够自然占满整行。 */
+/* 图片处理只有单个工具，不需要像 PDF 分类一样保留额外间距。 */
+.image-tools {
+  padding-top: 4px;
+}
+
+/* 中屏下侧栏变成整行，PDF 的四个分类可以并排展示。 */
+@media (min-width: 761px) and (max-width: 1180px) {
+  .category-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    border-left: 0;
+  }
+}
+
+/* 手机端恢复普通纵向三级菜单。 */
 @media (max-width: 760px) {
   .function-sidebar {
     padding: 13px;
   }
 
-  .tool-nav {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .tool-group + .tool-group {
-    margin-top: 0;
-    padding-top: 0;
-    border-top: 0;
-  }
-}
-
-/* 很窄的手机上恢复单列菜单，避免文字被压缩到不可读。 */
-@media (max-width: 480px) {
-  .tool-nav {
-    grid-template-columns: 1fr;
-  }
-
-  .tool-group + .tool-group {
-    margin-top: 8px;
-    padding-top: 10px;
-    border-top: 1px solid var(--bm-border);
+  .category-list {
+    display: block;
+    border-left: 1px solid var(--bm-border-strong);
   }
 }
 </style>
